@@ -175,12 +175,15 @@ class HtmlToDocx(HTMLParser):
             "images": True,
             "tables": True,
             "styles": True,
+            "footnotes": True,
         }
         self.table_row_selectors = [
             "table > tr",
             "table > thead > tr",
             "table > tbody > tr",
             "table > tfoot > tr",
+        self.footnote_selectors = [
+            "pop > poptext",
         ]
         self.table_style = DEFAULT_TABLE_STYLE
         self.paragraph_style = DEFAULT_PARAGRAPH_STYLE
@@ -197,6 +200,7 @@ class HtmlToDocx(HTMLParser):
         self.bs = self.options["fix-html"]  # whether or not to clean with BeautifulSoup
         self.document = self.doc
         self.include_tables = True  # TODO add this option back in?
+        self.include_footnotes = self.options["footnotes"]
         self.include_images = self.options["images"]
         self.include_styles = self.options["styles"]
         self.paragraph = None
@@ -331,6 +335,37 @@ class HtmlToDocx(HTMLParser):
                 # avoid exposing filepaths in document
                 self.doc.add_paragraph("<image: %s>" % get_filename_from_url(src))
         # add styles?
+
+    def handle_footnote(self):
+        footnote_soup = self.footnotes[self.footnote_no]
+        _footnote = self.get_footnote_text(footnote_soup)[0]
+        html = self.get_cell_html(_footnote)
+
+        # parse all html in another document
+        _doc = Document()
+        child_parser = HtmlToDocx()
+        child_parser.copy_settings_from(self)
+        child_parser.add_html_to_paragraph(html or " ", _doc)
+        _paras = _doc.paragraphs
+
+        # create footnote and _doc contents to it
+        self.paragraph.add_footnote("")
+
+        # if not inside a table
+        if isinstance(self.doc, docx.document.Document):
+            self.footnote = self.doc.footnotes[-1]
+        else:
+            # look for ._parent
+            _parent = self.doc
+            while _parent._parent:
+                _parent = _parent._parent
+            self.footnote = _parent.footnotes[-1]
+        [self.footnote.paragraph.merge_paragraph(_p) for _p in _paras]
+
+        self.instances_to_skip = len(footnote_soup.find_all("pop"))
+        self.skip_tag = "pop"
+        self.skip = True
+        self.footnote = None
 
     def handle_table(self):
         """
@@ -507,6 +542,10 @@ class HtmlToDocx(HTMLParser):
             self.handle_img(current_attrs)
             return
 
+        elif tag == "pop":
+            self.handle_footnote()
+            return
+
         elif tag == "table":
             self.handle_table()
             return
@@ -547,6 +586,9 @@ class HtmlToDocx(HTMLParser):
             self.table = None
             self.doc = self.document
             self.paragraph = None
+        elif tag == "pop":
+            self.footnote_no += 1
+            self.footnote = None
 
         if tag in self.tags:
             self.tags.pop(tag)
@@ -612,6 +654,9 @@ class HtmlToDocx(HTMLParser):
         # If there's a header, body, footer or direct child tr tags, add row dimensions from there
         return table_soup.select(", ".join(self.table_row_selectors), recursive=False)
 
+    def get_footnote_text(self, footnote_soup):
+        return footnote_soup.select(", ".join(self.footnote_selectors), recursive=False)
+
     def get_table_columns(self, row):
         # Get all columns for the specified row tag.
         return row.find_all(["th", "td"], recursive=False) if row else []
@@ -639,12 +684,22 @@ class HtmlToDocx(HTMLParser):
         self.tables = self.ignore_nested_tables(self.soup.find_all("table"))
         self.table_no = 0
 
+    def get_footnotes(self):
+        if not hasattr(self, "soup"):
+            self.include_footnotes = False
+            return
+        self.footnotes = self.soup.find_all("pop")
+        self.footnote_no = 0
+
     def run_process(self, html):
         if self.bs and BeautifulSoup:
             self.soup = BeautifulSoup(html, "html.parser")
             html = str(self.soup)
         if self.include_tables:
             self.get_tables()
+        if self.include_footnotes:
+            self.get_footnotes()
+
         self.feed(html)
 
     def add_html_to_document(self, html, document):
@@ -669,6 +724,12 @@ class HtmlToDocx(HTMLParser):
         self.run_process(html)
         # cells must end with a paragraph or will get message about corrupt file
         # https://stackoverflow.com/a/29287121
+        if not self.doc.paragraphs:
+            self.doc.add_paragraph("")
+
+    def add_html_to_paragraph(self, html, paragraph):
+        self.set_initial_attrs(paragraph)
+        self.run_process(html)
         if not self.doc.paragraphs:
             self.doc.add_paragraph("")
 
