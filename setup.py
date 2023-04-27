@@ -27,7 +27,7 @@ def text_of(relpath):
 version = "0.0.1"
 
 
-NAME = "html-docx"
+NAME = "htmldocx"
 VERSION = version
 DESCRIPTION = "Create and update Microsoft Word .docx files."
 KEYWORDS = "docx office openxml word"
