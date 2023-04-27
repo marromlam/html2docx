@@ -182,6 +182,7 @@ class HtmlToDocx(HTMLParser):
             "table > thead > tr",
             "table > tbody > tr",
             "table > tfoot > tr",
+        ]
         self.footnote_selectors = [
             "pop > poptext",
         ]
